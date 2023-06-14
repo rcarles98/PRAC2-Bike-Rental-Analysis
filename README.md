@@ -9,7 +9,7 @@ En aquest repositori, el fitxer original el trobareu amb el nom: **train.csv**. 
 
 D'altra banda, l'arxiu **bikes.csv** recull les dades un cop tractades, on s'han recodificat alguns atributs com "season" (Estiu, Primavera, Tardor i Hivern), s'han discretitzat d'altres com la hora (la nova columna es coneix com a segment_horari) i s'han tractat els valors atípics mitjançant imputació de nous valors.
 
-A la carpeta **source** hi trobareu el codi generat per analitzar les dades.
+A la carpeta **source** hi trobareu el codi generat per analitzar les dades en format *rmd*.
 
 El document **memòria.pdf** recull les respostes als enunciats de *Pràctica 2. Com realitzar la neteja i l'anàlisi de dades*. 
 
