@@ -11,7 +11,7 @@ D'altra banda, l'arxiu **bikes.csv** recull les dades un cop tractades, on s'han
 
 A la carpeta **source** hi trobareu el codi generat per analitzar les dades en format *rmd*.
 
-El document **memòria.pdf** recull les respostes als enunciats de *Pràctica 2. Com realitzar la neteja i l'anàlisi de dades*. 
+El document **memòria.pdf** / **memòria.html** recull les respostes als enunciats de *Pràctica 2. Com realitzar la neteja i l'anàlisi de dades*. 
 
 ## Membres de l'equip
 La pràctica ha estat realitzada per **Arnau Janot Baró** i **Robert Carles i Marqueño**. 
