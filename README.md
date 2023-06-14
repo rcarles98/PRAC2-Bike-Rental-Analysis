@@ -15,3 +15,13 @@ El document **memòria.pdf** / **memòria.html** recull les respostes als enunci
 
 ## Membres de l'equip
 La pràctica ha estat realitzada per **Arnau Janot Baró** i **Robert Carles i Marqueño**. 
+
+
+## Taula de contribucions 
+
+|        Contribucions      |    Signatura  |
+| --------------------------| ------------- |
+|   Investigació prèvia     |    RCM, AJB   |
+| Redacció de les respostes |    RCM, AJB   |
+|  Desenvolupament del codi |    RCM, AJB   |
+|   Participació al vídeo   |    RCM, AJB   |
