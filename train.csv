@@ -1,4 +1,4 @@
-id;year;hour;season;holiday;workingday;weather;temp;atemp;humidity;windspeed;count
+id,year,hour,season,holiday,workingday,weather,temp,atemp,humidity,windspeed,count
 3;2012;23;3;0;0;2;23.78;27.275;73;11.0014;133
 4;2011;8;3;0;0;1;27.88;31.82;57;0;132
 5;2012;2;1;0;1;1;20.5;24.24;59;0;19
