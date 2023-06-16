@@ -1,0 +1,602 @@
+---
+title: "PRAC2. Com realitzar la neteja i l'ànalisi de dades"
+author: "Robert Carles i Marqueño i Arnau Janot Baró"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+> En aquesta pràctica s’elabora un cas pràctic orientat a aprendre a identificar les dades
+rellevants per un projecte analític i usar les eines d’integració, neteja, validació i anàlisi
+de les mateixes.
+
+
+```{r message = FALSE, warning = FALSE}
+# Requeriments
+if (!require('dplyr')) install.packages('dplyr'); library(dplyr)
+if (!require('dbscan')) install.packages('dbscan'); library(dbscan)
+if (!require('gridExtra')) install.packages('gridExtra'); library(gridExtra)
+if (!require('ggplot2')) install.packages('ggplot2'); library(ggplot2)
+if (!require('grid')) install.packages('grid'); library(cluster)
+if (!require('cluster')) install.packages('cluster'); library(cluster)
+if (!require('fpc')) install.packages('fpc'); library(fpc)
+if (!require('ggfortify')) install.packages('ggfortify'); library(ggfortify)
+if (!require('tidyverse')) install.packages('tidyverse'); library(tidyverse)
+if (!require('Stat2Data')) install.packages('Stat2Data'); library('Stat2Data')
+if (!require('factoextra')) install.packages('factoextra'); library('factoextra')
+if (!require('corrplot')) install.packages('corrplot'); library('corrplot')
+if (!require('polycor')) install.packages('polycor'); library('polycor')
+
+
+# Funció multiplot
+multiplot <- function(..., plotlist = NULL, file, cols = 1, layout = NULL) {
+  require(grid)
+
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                 ncol = cols, nrow = ceiling(numPlots/cols))
+}
+
+if (numPlots == 1) {
+print(plots[[1]])
+
+} else {
+grid.newpage()
+pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+for (i in 1:numPlots) {
+  matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+  print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                  layout.pos.col = matchidx$col))
+ }
+}
+ }
+
+```
+
+
+# 1. Descripció del dataset
+> Perquè és important i quina pregunta/problema pretén respondre?
+
+Els sistemes de lloguer de bicicletes (Bicing a Barcelona, Girocleta a Girona) han tingut un èxit notori als darrers anys i s'ha mostrat com una mesura indispensable cap a la reducció de l'emissió de gasos d'efecte hivernacle a les grans ciutats. 
+
+Tot i la bona rebuda per part dels consumidors, val a dir que un servei d'aquestes característiques no és senzill de gestionar. És per això que ens hem proposat identificar alguns aspectes importants per anticipar el comportament de la demanda. 
+
+Ens fem les següents preguntes:
+
+A. Hi ha més demanda de bicicletes els caps de setmana?
+
+B. L'estiu és l'època de l'any amb més demanda?
+
+C. L'hora i les condicions climàtiques (temperatura, humitat, velocitat del vent) influeixen en el nombre de bicicletes llogades?
+
+
+# 2. Integració i selecció
+> Integració i selecció de les dades d’interès a analitzar. Pot ser el resultat d’addicionar diferents datasets o una subselecció útil de les dades originals, en base a l’objectiu que es vulgui aconseguir.
+
+La font del joc de dades és Kaggle, i es poden trobar els arxius al següent enllaç:
+
+https://www.kaggle.com/datasets/aguado/bike-rental-data-set-uci?resource=download
+
+Carreguem l'arxiu d'entrenament (train) amb el nom `bikes`.
+
+```{r 2.1}
+bikes <- read.csv("train.csv", sep=";")
+```
+
+
+Revisem l'estructura original de `bikes`.
+```{r 2.2}
+str(bikes)
+```
+Hi ha **12** variables i **7689** registres.
+
++ **ID** Número identificador. (Primary Key)
+
++ **YEAR** Any (2011 o 2012)
+
++ **HOUR** Hora del dia (de 0 a 23)
+
++ **SEASON** Estació climàtica (1 = hivern, 2 = primavera, 3 = estiu, 4 = tardor)
+
++ **HOLIDAY** Si el dia és festiu
+
++ **WORKINGDAY** Si el dia és laboral (ni festiu ni cap de setmana)
+
++ **WEATHER** quatre categories de millor (1) a pitjor (4)
+
++ **TEMP** Temperatura en graus Celsius
+
++ **ATEMP** Sensació tèrmica en graus Celsius
+
++ **HUMIDITY** Humitat relativa
+
++ **WINDSPEED** velocitat del vent (km/h)
+
++ **COUNT** total de bicicletes llogades en aquella franja temporal
+
+
+Si ens hi fixem, totes les variables apareixen interpretades com a numèriques. No obstant, n'hi ha dues binàries (`holiday` i `workingday`) i dues categòriques (`season` i `weather`) que han estat codificades. 
+
+Fem les modificacions petinents per a que el dataset compleixi els requisits pertinents.
+
+```{r 2.3}
+# Guardem el joc de dades original
+bikes_original <- bikes
+
+# Variables binàries
+bikes$holiday <- as.factor(bikes$holiday)
+bikes$workingday <- as.factor(bikes$workingday)
+
+# Vaiables categòriques [opcional: millor per a les visualitzacions]
+seasons <- c('Hivern','Primavera','Estiu','Tardor')
+weathers <- c('Molt Bo', 'Bo', 'Dolent', 'Molt Dolent')
+
+for (i in 1:4) {
+  bikes$season[bikes$season == i] <- seasons[i]
+  bikes$weather[bikes$weather == i] <- weathers[i]
+}
+
+bikes$season <- as.factor(bikes$season)
+bikes$weather <- as.factor(bikes$weather)
+
+```
+
+Ara sí, el nostre joc de dades conté **8** variables **numèriques**, **2 binàries** i **2 categòriques**.
+
+\newpage
+
+# 3. Neteja de les dades
+
+> Les dades contenen zeros o elements buits? Gestiona cadascun d’aquests casos.
+
+Comprovem que les dades no contiguin valors NA o buits.
+
+```{r 3.1}
+# Valors NA
+colSums(is.na(bikes))
+
+# Valors buits
+colSums(bikes=="")
+
+```
+
+Les dades estan netes. 
+
+Fem una primera aproximació a les dades.
+
+```{r 3.2}
+summary(bikes)
+```
+
+
+Mostrem la distribució de les variables numèriques.
+
+```{r 3.3, echo=FALSE}
+# Some numeric variables
+numeric_var1 <- c( "hour", "temp", "atemp", "humidity", "windspeed", "count")
+
+# Multiplot
+ggplot(gather(bikes[numeric_var1], key="Variable", value="Valor"),
+       aes(x=Variable, y=Valor, fill=Variable))+
+  geom_violin()+
+  theme(legend.position="none", axis.text.x = element_blank()) +
+  scale_fill_brewer(palette="Pastel1") +
+  facet_wrap(. ~ Variable, scales="free")
+```
+
+
+Mostrem la distribució de les variables categòriques i numèriques.
+
+```{r 3.4}
+
+# Variables categòriques
+categoric_var<-c("season", "weather", "holiday", "workingday")
+plotList <- list()
+
+for(i in 1:length(categoric_var)){
+  # Taula recompte 
+  hawk_cat <- table(bikes[categoric_var[i]])
+  
+  # Dataframe per visualitzar
+  data <- data.frame(
+    category=names(hawk_cat),
+    count=round(as.numeric(hawk_cat)*100/sum(hawk_cat),digits = 2)
+  )
+  data$fraction <- data$count / sum(data$count)
+  data$ymax <- cumsum(data$fraction)
+  data$ymin <- c(0, head(data$ymax, n=-1))
+  data$labelPosition <- (data$ymax + data$ymin) / 2
+  data$label <- paste0(data$category, "\n value: ", data$count)
+  
+  # Gràfica
+  ggp_geom1 <- ggplot(data, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=category)) +
+    geom_rect() +
+    geom_label( x=3.5, aes(y=labelPosition, label=label), size=3) +
+    ggtitle(categoric_var[i]) +
+    scale_fill_brewer(palette=4) +
+    coord_polar(theta="y") +
+    xlim(c(2, 4)) +
+    theme_void() +
+    theme(legend.position = "none")
+  
+  # L'afegim a la plotlist
+  plotList[[i]] <- ggp_geom1
+}
+
+multiplot(plotlist = plotList, cols = 2)
+```
+
+**Observacions inicials**
+
++ `id` La clau primària. Els indicadors de mesura central no són d'interès. El nombre màxim (10886) és superior el nombre de registres (7689), senyal que el dataset original s'ha seccionat en dos de forma aleatòria.
+
++ `year` Les dades pertanyen al 2011 i 2012.
+
++ `hour` + `season` Ambdues variables estan repartides equitativament.
+
++ `holiday` + `workingday` Com ja sabem, s'observen més dies no festius que festius (2.9%); també més laborals (67.73%)  que no laborals.
+
++ `weather` No apareix cap registre amb un temps molt dolent. La majoria d'ells ha tingut molt bones condicions climàtiques (66.61%).
+
++ `temp` + `atemp` La temperatura mitjana és de 20.27ºC, mentre que la sensació tèrmica és de 23.7ºC.
+
++ `humidity` La humitat mitjana és de 61.77 i la seva distribució es concentra a la franja de 35-80.
+
++ `windspeed` La velocitat del vent ronda els 13 km/h i la seva distribució apunta a que deuen haver-hi alguns valors atípics.
+
++ `count` De mitjana es lloguen 191 bicicletes per cada lot de temps. Mentre que el menor registre ha estat una sola bicicleta, el rècord n'han estat 977. Donada la diferència entre mitjana i mediana, valdrà la pena revisar la presència d'outliers. S'arriba a la mateixa conclusió observant el gràfic de violí. 
+
+
+> Identifica i gestiona els valors extrems.
+
+Revisem la presència de **valors atípics**.
+
+```{r 3.5}
+# Boxplot ggplot2
+ggplot(gather(bikes[numeric_var1],key="Variable", value="Valor"),aes(x=Variable, y=Valor, fill=Variable))+
+  geom_boxplot()+
+  theme(legend.position="none", axis.text.x = element_blank()) +
+  scale_fill_brewer(palette="Pastel1") +
+  facet_wrap(.~Variable, scales="free")
+```
+
+
+```{r 3.6}
+
+                    # OUTLIERS
+# COUNT
+outliers_count <- boxplot.stats(bikes$count)$out
+length(outliers_count)
+
+# WINDSPEED
+outliers_windspeed <- boxplot.stats(bikes$windspeed)$out
+length(outliers_windspeed)
+
+
+```
+Hi ha **219** outliers a `count` i `windspeed` en té **154**.
+
+Enlloc de prescindir de tot el registre, imputarem el valor que es troba a la punta del bigoti superior del diagrama de caixa. És a dir, imputarem el *nou valor màxim* un cop borrats els valors superiors a aquest.
+
+```{r 3.7}
+            # IMPUTACIÓ DE VALORS
+
+# COUNT
+bikes[bikes$count %in% outliers_count,"count"] <- NA
+bikes[is.na(bikes$count),"count"] <- max(na.omit(bikes$count))
+
+
+# WINDSPEED
+bikes[bikes$windspeed %in% outliers_windspeed,"windspeed"] <- NA
+bikes[is.na(bikes$windspeed),"windspeed"] <- max(na.omit(bikes$windspeed))
+
+```
+
+
+\newpage
+
+# 4. Anàlisi de les dades
+
+## 4.1. Selecció dels grups de dades
+> Selecció dels grups de dades que es volen analitzar/comparar (p. e., si es volen comparar grups de dades, quins són aquests grups i quins tipus d’anàlisi s’aplicaran?).
+
+Per a respondre a les preguntes `A` i `B` s'emprarà la variable `count` i, respectivament, `workingday` i `season`.
+
+L'última qüestió (`C`), en canvi, requereix un estudi holístic de les variables. Per tant, començarem fent un estudi de les **correlacions** entre les diferents variables per a identificar problemes de colinealitat alhora que observem les variables que més influeixen en el nombre de bicicletes llogades. Amb aquest subconjunt de dades, provarem de generar un **model de regressió lineal múltiple** i quantificarem el seu ajust.
+
+## 4.2. Comprovació de la normalitat i homogeneïtat de la variància
+
+```{r 4.2.1}
+
+ggplot(bikes, aes(x=count)) +
+  geom_density(fill="darkslategray2", alpha=0.4) +
+  ggtitle("Distribució de count") +
+  xlab('count') +
+  ylab('Densitat')
+
+```
+
+La distribució de `count` **no és normal**. Tot i haver tractat outliers, s'observa un pic desplaçat cap a l'esquerra i unes dades molt disperses. En tot cas, si tenim en compte el **teorema del límit central** (TLC) i sabem que tenim més de 30 mostres (bastantes més), podem assumir que la **mitjana de `count` es distribueix de forma normal**.
+
+
++ L'homogeneïtat de les dades. Pregunta A.
+
+```{r 4.2.A}
+# Subdataframes
+bikes_work <- bikes[bikes$workingday == 1,]
+bikes_fest <- bikes[bikes$workingday == 0,]
+
+# Test d'igualtat de variàncies, 95
+var.test(bikes_work$count, bikes_fest$count, conf.level = 0.95)
+
+```
+
+Donat que p > 0.05, **acceptem la igualtat de variàncies** entre els dies laborals i caps de setmana.
+
+
++ L'homogeneïtat de les dades. Pregunta B.
+
+```{r 4.2.B}
+# Subdataframes
+bikes_Summer <- bikes[bikes$season == "Estiu",]
+bikes_NotSummer <- bikes[bikes$season != "Estiu",]
+
+# Test d'igualtat de variàncies, 95
+var.test(bikes_Summer$count, bikes_NotSummer$count, conf.level = 0.95)
+
+```
+
+Donat que p < 0.05, **rebutgem la igualtat de variàncies** entre l'estiu i la resta d'estacions.
+
+
+## 4.3. Aplicació de proves estadístiques
+
+## 4.3.1 Contrasts d'hipòtesi
+
+
++ **A) Hi ha més demanda de bicicletes els caps de setmana?**
+
+**1. Pregunta de recerca**
+
+La demanda de bicicletes és significativament superior el cap de setmana?
+
+**2. Hipòtesi nul·la i l'alternativa**
+
+
+$H_0$: $\mu_{capde}$ = $\mu_{laboral}$
+
+$H_1$: $\mu_{capde}$ > $\mu_{laboral}$
+
+
+**3. Test de dues mostres independents sobre la mitjana amb variàncies desconegudes iguals**
+
+```{r 4.3.1. A}
+t.test(bikes_work$count, bikes_fest$count, var.equal = TRUE, alternative = "greater", conf.level = 0.95)
+
+```
+
+Hem obtingut un valor p > 0.05. No podem rebutjar la hipòtesi nul·la.
+
+**4. Conclusió**
+
+La demanda no és significativament superior durant els caps de setmana.
+
+```{r 4.3.1. A. Gràfica}
+
+# Mitjanes de count per workingday
+mean_count_df <- bikes %>%
+  group_by(workingday) %>%
+  summarize(mean=mean(count))
+
+# Gràfica count + workingday
+ggplot(bikes, aes(x=count, fill=workingday)) +
+  geom_density(alpha=0.4) +
+  scale_fill_discrete(name = "Dia laboral") +
+  ggtitle("Distribució de count en funció de workingday") +
+  xlab('count') +
+  ylab('Densitat')+
+  geom_vline(data = mean_count_df, aes(
+    xintercept = mean, color = workingday),linetype = "dashed", size=0.8)+
+  guides(color = FALSE, size = FALSE)
+  
+
+```
+
+
+
++ **B) Hi ha més demanda de bicicletes a l'estiu?**
+
+
+**1. Pregunta de recerca**
+
+La demanda de bicicletes a l'estiu és significativament superior a la resta de l'any?
+
+**2. Hipòtesi nul·la i l'alternativa**
+
+
+$H_0$: $\mu_{estiu}$ = $\mu_{altre}$
+
+$H_1$: $\mu_{estiu}$ > $\mu_{altre}$
+
+**3. Test de dues mostres independents sobre la mitjana amb variàncies desconegudes diferents**
+
+```{r 4.3.1.B}
+t.test(bikes_Summer$count, bikes_NotSummer$count, var.equal = FALSE, alternative = "greater", conf.level = 0.95)
+
+```
+
+Hem obtingut un valor p < 0.05. Rebutgem la hipòtesi nul·la.
+
+**4. Conclusió**
+
+L'estiu és l'estació de l'any que registra una demanda significativament superior a la resta.
+
+
+```{r 4.3.1. B. Gràfica}
+
+# Mitjanes de count per season
+mean_count_df <- bikes %>%
+  group_by(season) %>%
+  summarize(mean=mean(count))
+
+# Gràfica count + season
+ggplot(bikes, aes(x=count, fill=season)) +
+  geom_density(alpha=0.4) +
+  scale_fill_discrete(name = "Estació") +
+  ggtitle("Distribució de count en funció de season") +
+  xlab('count') +
+  ylab('Densitat')+
+  geom_vline(data = mean_count_df, aes(
+    xintercept = mean, color = season),linetype = "dashed", size=0.8)+
+  guides(color = FALSE, size = FALSE)
+  
+```
+
+## 4.3.2 Anàlisi de correlacions
+
+
+
+Estudiem la correlació i col·linealitat de les variables:
+
+```{r 4.3.2}
+corr_df <- bikes_original[2:12]
+corr <- hetcor(corr_df,use="complete.obs")
+corrplot.mixed(corr=corr$correlations)
+```
+
+**Observacions**
+
++ No s'ha detectat cap correlació entre la festivitat o *laboralitat* i el nombre de bicis llogades. Tampoc és massa significativa la variable `windspeed` ni `season`. 
+
+```{r 4.3.2 G1}
+# Mitjanes de count per holiday
+mean_count_df <- bikes %>%
+  group_by(holiday) %>%
+  summarize(mean=mean(count))
+
+# Gràfica count + holiday
+ggplot(bikes, aes(x=count, fill=holiday)) +
+  geom_density(alpha=0.4) +
+  scale_fill_discrete(name = "Festiu") +
+  ggtitle("Distribució de count en funció de holiday") +
+  xlab('count') +
+  ylab('Densitat')+
+  geom_vline(data = mean_count_df, aes(
+    xintercept = mean, color = holiday),linetype = "dashed", size=0.8)+
+  guides(color = FALSE, size = FALSE)
+
+```
+
+
++ Les variables que fan augmentar `count` de forma més notòria són l'**hora** i la **temperatura/sensació tèrmica** - seguits de l'**any**. En canvi, a mesura que augmenta la **humitat** disminueix la demanda. 
+
+```{r 4.3.2 G2}
+
+# Discretitzem la variable hora
+bikes$segment_horari <- cut(bikes$hour, breaks = c(-1, 8, 16, 23),
+                               labels = c("Matinada", "Matí", "Vespre"))
+
+
+# Mitjanes de count per segment_horari
+mean_count_df <- bikes %>%
+  group_by(segment_horari) %>%
+  summarize(mean=mean(count))
+
+# Gràfica count + segment_horari
+ggplot(bikes, aes(x=count, fill=segment_horari)) +
+  geom_density(alpha=0.4) +
+  scale_fill_discrete(name = "Segment Horari") +
+  ggtitle("Distribució de count en funció de segment_horari") +
+  xlab('count') +
+  ylab('Densitat')+
+  geom_vline(data = mean_count_df, aes(
+    xintercept = mean, color = segment_horari),linetype = "dashed", size=0.8)+
+  guides(color = FALSE, size = FALSE)
+
+
+# Al haver només dos anys, el visualitzem igual 
+bikes$year <- as.factor(bikes$year)
+
+# Mitjanes de count per year
+mean_count_df <- bikes %>%
+  group_by(year) %>%
+  summarize(mean=mean(count))
+
+# Gràfica count + year
+ggplot(bikes, aes(x=count, fill=year)) +
+  geom_density(alpha=0.4) +
+  scale_fill_discrete(name = "Any") +
+  ggtitle("Distribució de count en funció de year") +
+  xlab('count') +
+  ylab('Densitat')+
+  geom_vline(data = mean_count_df, aes(
+    xintercept = mean, color = year),linetype = "dashed", size=0.8)+
+  guides(color = FALSE, size = FALSE)
+
+
+```
+
+
+La demanda és major al 2012. Unes dades molt prometedores de cara al negoci! 
+
+
++ La major correlació es troba entre la temperatura i la sensació tèrmica (el 99%). Per tant, podrem prescindir d'alguna d'elles. 
+
+
+## 4.3.3 Regressió lineal múltiple 
+
+
+Per últim, estimarem per mínims quadrats ordinaris un model lineal que expliqui la variable `count` en funció de les variables `year`, `hour`, `temp` i `humidity`: 
+
+```{r 4.3.3 }
+
+model <- lm(count~year+hour+temp+humidity, data = bikes)
+summary(model)
+
+```
+
+
+**Observacions**
+
++ Donat un p-valor inferior a 2.2e-16, podem afirmar que **totes les variables escollides són significatives**. Aquest resultat, de fet, és coherent amb els resultats de l'apartat anterior.
+
++ El coeficient de determinació indica que **només un 38.55% de la variància** de les observacions **queda explicada** pel model lineal. 
+
+
+
+# 5. Conclusions finals
+
+>  A partir dels resultats obtinguts, quines són les conclusions? Els resultats permeten respondre al problema?
+
+Per acabar el projecte podem extreure les següents conclusions finals.
+
+Podem afirmar que hi ha una **demanda significativament superior de bicicletes durant l'estiu**. Podem associar aquest resultat al bon temps. El bon temps fa que la gent vulgui estar més al carrer realitzant activitats a l'aire lliure com pot ser utilitzar les bicicletes.
+
+També podem afirmar que **no hi ha una diferència significativa en la demanda de bicicletes entre els dies laborals i els caps de setmana**. Per tant ni el treball ni les vacances son doncs patrons que puguin justificar l'ús de la bicicleta.
+
+L'**hora** del dia, la **temperatura/sensació tèrmica**, l'**humitat** i l'**any** són les variables més rellevants per predir la demanda de bicicletes ja que tenen una **influència significativa** en el nombre de bicicletes llogades. 
+
+El que ens ha sorprés molt també és la **correlació negativa de count i humitat**: a mesura que augmenta la humitat, la demanda de bicicletes disminueix.
+
+El **model de regressió lineal múltiple** utilitzat per predir la demanda de bicicletes és significatiu i **explica aproximadament el 38.55% de la variabilitat observada**. Per tant cal remarcar que el 38,55% queda cobert per les variables estudiades però la resta queda en mans d'altres factors influents en la demanda que no hem estudiat aquí. 
+
+Finalment, els resultats obtinguts tenen un alt valor afegit per a les empreses que proporcionen serveis de bicing ja que els permet implementar una estratègia de negoci eficaç.
+
+\newpage
+
+# 6. Taula de contribucions 
+
+|        Contribucions      |    Signatura  |
+| --------------------------| ------------- |
+|   Investigació prèvia     |    RCM, AJB   |
+| Redacció de les respostes |    RCM, AJB   |
+|  Desenvolupament del codi |    RCM, AJB   |
+|   Participació al vídeo   |    RCM, AJB   |
+
+
